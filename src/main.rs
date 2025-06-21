@@ -1,14 +1,14 @@
-use sqlx::{mysql::MySqlPoolOptions, MySqlPool, Row};
+use sqlx::{mysql::MySqlPoolOptions, MySqlPool}; // `Row` import removed
 use dotenv::dotenv;
 use std::io::{self, Write};
-use chrono::{NaiveDateTime, Local};
+use chrono::{NaiveDateTime, Local, TimeZone}; // `TimeZone` imported for Local.from_local_datetime
 
 // Define a struct to represent our Task
 #[derive(Debug, sqlx::FromRow)]
 struct Task {
-    id: i32,
+    id: i32, // Corrected to i32 to match MySQL's INT
     description: String,
-    completed: bool,
+    completed: bool, // Correctly mapped from MySQL's TINYINT(1)
     created_at: NaiveDateTime,
 }
 
@@ -86,9 +86,12 @@ async fn add_task(pool: &MySqlPool) -> Result<(), sqlx::Error> {
 }
 
 async fn list_tasks(pool: &MySqlPool) -> Result<(), sqlx::Error> {
-    let tasks: Vec<Task> = sqlx::query_as!(Task, "SELECT id, description, completed, created_at FROM tasks ORDER BY created_at DESC")
-        .fetch_all(pool)
-        .await?;
+    let tasks: Vec<Task> = sqlx::query_as!(
+        Task,
+        "SELECT id, description, completed AS 'completed!: bool', created_at FROM tasks ORDER BY created_at DESC"
+    )
+    .fetch_all(pool)
+    .await?;
 
     if tasks.is_empty() {
         println!("No tasks found.");
@@ -96,7 +99,12 @@ async fn list_tasks(pool: &MySqlPool) -> Result<(), sqlx::Error> {
         println!("\n--- Your Tasks ---");
         for task in tasks {
             let status = if task.completed { "[COMPLETED]" } else { "[PENDING]" };
-            let created_at_local: chrono::DateTime<Local> = chrono::DateTime::from_naive_utc_and_offset(task.created_at, Local::now().fixed_offset());
+            
+            // FIX: Correctly converting NaiveDateTime from DB to DateTime<Local>
+            let created_at_local: chrono::DateTime<Local> = Local.from_local_datetime(&task.created_at)
+                .earliest() // Handles potential DST ambiguities by picking the earlier time
+                .expect("Failed to convert naive datetime to local datetime"); // Will panic if conversion is impossible (e.g., non-existent time during DST)
+
             println!("ID: {}, {} Description: '{}' (Created: {})", task.id, status, task.description, created_at_local.format("%Y-%m-%d %H:%M:%S"));
         }
     }
@@ -109,7 +117,8 @@ async fn mark_task_completed(pool: &MySqlPool) -> Result<(), sqlx::Error> {
 
     let mut task_id_str = String::new();
     io::stdin().read_line(&mut task_id_str).expect("Failed to read line");
-    let task_id: u32 = match task_id_str.trim().parse() {
+    // FIX: Parsing target changed to i32 for consistency with Task.id
+    let task_id: i32 = match task_id_str.trim().parse() {
         Ok(num) => num,
         Err(_) => {
             println!("Invalid task ID. Please enter a number.");
@@ -138,7 +147,8 @@ async fn delete_task(pool: &MySqlPool) -> Result<(), sqlx::Error> {
 
     let mut task_id_str = String::new();
     io::stdin().read_line(&mut task_id_str).expect("Failed to read line");
-    let task_id: u32 = match task_id_str.trim().parse() {
+    // FIX: Parsing target changed to i32 for consistency with Task.id
+    let task_id: i32 = match task_id_str.trim().parse() {
         Ok(num) => num,
         Err(_) => {
             println!("Invalid task ID. Please enter a number.");
